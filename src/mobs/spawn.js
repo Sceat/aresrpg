@@ -11,7 +11,7 @@ import { Types } from './types.js'
 
 const { entitiesByName } = minecraft_data(VERSION)
 
-const color_by_type = {
+export const color_by_type = {
   mob: 'white',
   archiMob: 'gold',
   boss: 'red',
@@ -57,7 +57,7 @@ export function spawn_mob(client, { mob, position, events }) {
         key: 2,
         type: 5,
         value: JSON.stringify({
-          text: displayName + `(${entity_id})`,
+          text: displayName,
           color: color_by_type[type],
           extra: level && [{ text: ` [Lvl ${level}]`, color: 'dark_red' }],
         }),
