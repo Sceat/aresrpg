@@ -1,26 +1,20 @@
-import { on } from 'events'
-
-import { aiter } from 'iterator-helper'
-
-import { abortable } from '../iterator.js'
 import { Action, Context } from '../events.js'
 import { create_armor_stand } from '../armor_stand.js'
 import logger from '../logger.js'
 import { GameMode } from '../gamemode.js'
+import ring_buffer from '../lib/ring_buffer.js'
 
-export const DAMAGE_INDICATORS_AMOUNT = 5
+const DAMAGE_INDICATORS_AMOUNT = 5
+const DAMAGE_INDICATOR_TTL = 1200
 
 const log = logger(import.meta)
 
 /** @param {import('../context.js').InitialWorld} world */
-export function register(world) {
+export function register({ next_entity_id, ...world }) {
   return {
     ...world,
-    damage_indicators: {
-      amount: DAMAGE_INDICATORS_AMOUNT,
-      start_id: world.next_entity_id,
-    },
-    next_entity_id: world.next_entity_id + DAMAGE_INDICATORS_AMOUNT,
+    damage_indicator_start_id: next_entity_id,
+    next_entity_id: next_entity_id + DAMAGE_INDICATORS_AMOUNT,
   }
 }
 
@@ -37,80 +31,40 @@ export default {
         ...state,
         health,
       }
-    } else if (type === Action.DAMAGE_INDICATOR) {
-      const { position, damage } = payload
-      const cursor =
-        (state.damage_indicators.cursor + 1) % DAMAGE_INDICATORS_AMOUNT
-      const pool = [
-        ...state.damage_indicators.pool.slice(0, cursor),
-        { position, damage },
-        ...state.damage_indicators.pool.slice(cursor + 1),
-      ]
-
-      return {
-        ...state,
-        damage_indicators: {
-          cursor,
-          pool,
-        },
-      }
     }
     return state
   },
 
   /** @type {import('../context.js').Observer} */
   observe({ events, dispatch, client, world, signal }) {
-    events.on(Context.MOB_DAMAGE, ({ mob, damage }) => {
-      const position = mob.position()
-      const { height } = mob.constants
-
-      const final_pos = {
-        x: position.x + (Math.random() * 2 - 1) * 0.25,
-        y: position.y + height - 0.25 + (Math.random() * 2 - 1) * 0.15,
-        z: position.z + (Math.random() * 2 - 1) * 0.25,
-      }
-      dispatch(Action.DAMAGE_INDICATOR, { position: final_pos, damage })
+    const buffer = ring_buffer({
+      capacity: DAMAGE_INDICATORS_AMOUNT,
+      max_age: DAMAGE_INDICATOR_TTL,
+      on_eviction: entity_id => {
+        client.write('entity_destroy', {
+          entityIds: [entity_id],
+        })
+      },
     })
 
-    aiter(abortable(on(events, Context.STATE, { signal }))).reduce(
-      (
-        { cursor: last_cursor, handles },
-        [
-          {
-            damage_indicators: { cursor, pool },
-          },
-        ]
-      ) => {
-        if (last_cursor !== cursor) {
-          const { damage_indicators } = world
-          const { position, damage } = pool[cursor]
-          const entity_id = damage_indicators.start_id + cursor
+    events.on(Context.MOB_DAMAGE, ({ mob, damage }) => {
+      const { damage_indicator_start_id } = world
+      const entity_id = damage_indicator_start_id + buffer.cursor()
+      const { x, y, z } = mob.position()
+      const { height } = mob.constants
 
-          clearTimeout(handles[cursor])
+      const position = {
+        x: x + (Math.random() * 2 - 1) * 0.25,
+        y: y + height - 0.25 + (Math.random() * 2 - 1) * 0.15,
+        z: z + (Math.random() * 2 - 1) * 0.25,
+      }
 
-          create_armor_stand(client, entity_id, position, {
-            text: `-${damage}`,
-            color: 'red',
-          })
+      buffer.add(entity_id)
 
-          const handle = setTimeout(() => {
-            client.write('entity_destroy', {
-              entityIds: [entity_id],
-            })
-          }, 1200)
-
-          return {
-            cursor,
-            handles: [
-              ...handles.slice(0, cursor),
-              handle,
-              ...handles.slice(cursor + 1),
-            ],
-          }
-        }
-        return { cursor, handles }
-      },
-      { cursor: -1, handles: Array.from({ length: DAMAGE_INDICATORS_AMOUNT }) }
-    )
+      create_armor_stand(client, entity_id, position, {
+        text: `-${damage}`,
+        color: '#E74C3C', // https://materialui.co/flatuicolors Alizarin
+      })
+    })
   },
 }
