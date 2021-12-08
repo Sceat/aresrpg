@@ -1,20 +1,14 @@
-import { on } from 'events'
-import { setInterval } from 'timers/promises'
-
-import { aiter } from 'iterator-helper'
-import combineAsyncIterators from 'combine-async-iterators'
-
-import { abortable } from '../iterator.js'
 import { Context } from '../events.js'
 import { write_bossbar, Colors, Divisions, Actions } from '../boss_bar.js'
 import { Types } from '../mobs/types.js'
 import logger from '../logger.js'
+import lru_set from '../lib/lru_set.js'
+import { to_rgb, to_hex, Formats } from '../chat.js'
 
 const BOSS_BAR_AMOUNT = 3
 const BOSS_BAR_TTL = 5000
 
 const log = logger(import.meta)
-const is_present = item => !!item
 
 // prismarine already parse UUIDs but let's stay clean
 const format_uuid = entity_id =>
@@ -38,55 +32,81 @@ const mob_bar_division = ({ max_health }) => {
   else return Divisions.NOTCHES_20
 }
 
-const purge_outdated = ({ client, bossbars }) => {
-  bossbars
-    .filter(is_present)
-    .filter(({ age }) => age + BOSS_BAR_TTL <= Date.now())
-    .forEach(({ entityUUID }) => {
-      log.info({ entityUUID }, 'purge outdated bossbar')
-      write_bossbar({
-        client,
-        entityUUID,
-        action: Actions.REMOVE,
-      })
-    })
-  // @ts-ignore
-  return bossbars.filter(({ age } = {}) => age + BOSS_BAR_TTL > Date.now())
-}
+const format_title = ({
+  displayName,
+  level,
+  health,
+  max_health,
+  entity_id,
+}) => [
+  {
+    text: displayName,
+  },
+  {
+    text: ` [Lvl ${level}] `,
+    color: '#C0392B', // https://materialui.co/flatuicolors #pomegranate
+  },
+  {
+    text: '(',
+  },
+  {
+    text: health,
+    color: to_hex(to_rgb((100 * health) / max_health)),
+  },
+  {
+    text: '/',
+  },
+  {
+    text: max_health,
+    ...Formats.SUCCESS,
+  },
+  {
+    text: ')',
+  },
+  {
+    text: ` (${entity_id})`,
+    color: '#03A9F4',
+    bold: true,
+    underline: true,
+  },
+]
 
 export default {
   /** @type {import('../context.js').Observer} */
   observe({ events, dispatch, client, world, signal }) {
-    aiter(
-      abortable(
-        // @ts-ignore
-        combineAsyncIterators(
-          on(events, Context.MOB_DAMAGE, { signal }),
-          setInterval(1000, [], { signal })
-        )
-      )
-      // @ts-ignore
-    ).reduce((bossbars, [{ mob, damage } = {}]) => {
-      if (!mob) {
-        // entering here means the iteration is trigered by the interval
-        const next_bossbars = purge_outdated({ client, bossbars })
-        return [
-          ...next_bossbars,
-          ...Array.from({ length: BOSS_BAR_AMOUNT - next_bossbars.length }),
-        ]
-      }
+    const cache = lru_set({
+      capacity: BOSS_BAR_AMOUNT,
+      max_age: BOSS_BAR_TTL,
+      on_eviction: entityUUID =>
+        write_bossbar({
+          client,
+          entityUUID,
+          action: Actions.REMOVE,
+        }),
+    })
 
-      const { displayName, health: max_health = 20 } = Types[mob.mob]
+    events.on(Context.MOB_DAMAGE, ({ mob, damage }) => {
+      const {
+        displayName,
+        health: max_health = 20,
+        // TODO: we have work to do on json files
+        // the level should be here but isn't yet
+        // for the sake of this feature i need it here and will later remove the default value
+        level = 1,
+      } = Types[mob.mob]
       const { health } = mob.get_state()
       const entityUUID = format_uuid(mob.entity_id)
       const display_health = Math.max(0, Math.min(1, health / max_health))
       const color = mob_bar_color({ health, max_health })
+      const title = format_title({
+        displayName,
+        level,
+        health,
+        max_health,
+        entity_id: mob.entity_id,
+      })
 
-      const { entityUUID: last_entity_uuid } =
-        bossbars.find(({ entityUUID: uuid } = {}) => uuid === entityUUID) ?? {}
-
-      if (last_entity_uuid) {
-        log.info({ display_health, color, entityUUID }, 'update bossbar')
+      if (cache.access(entityUUID)) {
         write_bossbar({
           client,
           entityUUID,
@@ -99,50 +119,24 @@ export default {
           action: Actions.UPDATE_STYLE,
           color,
         })
-        return [
-          { entityUUID, age: Date.now() },
-          ...bossbars.filter(
-            ({ entityUUID: uuid } = {}) => uuid !== entityUUID
-          ),
-        ]
-      } else {
-        log.info({ display_health, entityUUID }, 'create bossbar')
         write_bossbar({
           client,
           entityUUID,
-          title: [
-            {
-              text: displayName,
-            },
-            {
-              text: ` (${mob.entity_id})`,
-              color: '#03A9F4',
-              bold: true,
-              underline: true,
-            },
-          ],
+          action: Actions.UPDATE_TITLE,
+          title,
+        })
+      } else {
+        log.info({ display_health, entityUUID }, 'create bossbar')
+        cache.add(entityUUID)
+        write_bossbar({
+          client,
+          entityUUID,
+          title,
           color,
           health: display_health,
           dividers: mob_bar_division({ max_health }),
         })
-
-        const { entityUUID: evicted_uuid } = bossbars.at(-1) ?? {}
-        if (evicted_uuid) {
-          log.info({ evicted_uuid }, 'evict bossbar')
-          write_bossbar({
-            client,
-            entityUUID: evicted_uuid,
-            action: Actions.REMOVE,
-          })
-        }
-
-        return [
-          { entityUUID, age: Date.now() },
-          ...bossbars
-            .filter(({ entityUUID: uuid } = {}) => uuid !== entityUUID)
-            .slice(0, -1),
-        ]
       }
-    }, Array.from({ length: BOSS_BAR_AMOUNT }))
+    })
   },
 }
