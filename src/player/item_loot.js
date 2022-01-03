@@ -10,6 +10,7 @@ import { block_position_equal } from '../position.js'
 import { VERSION, PLAYER_ENTITY_ID } from '../settings.js'
 import { item_to_slot } from '../items.js'
 import { Action, Context } from '../events.js'
+import { to_metadata } from '../entity_metadata.js'
 
 import { USABLE_INVENTORY_START, USABLE_INVENTORY_END } from './inventory.js'
 
@@ -44,18 +45,10 @@ function spawn_item_entity({ client, entity_id, item, world }) {
 
   client.write('entity_metadata', {
     entityId: entity_id,
-    metadata: [
-      {
-        key: 0,
-        type: 0,
-        value: 0x40,
-      },
-      {
-        key: 7,
-        type: 6,
-        value: item_to_slot(world.items[item.type], item.count),
-      },
-    ],
+    metadata: to_metadata('item_entity', {
+      entity_flags: { has_glowing_effect: true },
+      item: item_to_slot(world.items[item.type], item.count),
+    }),
   })
 }
 
