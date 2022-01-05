@@ -1,2 +1,2 @@
 * @DeltaEvo @Sceat
-*.json @dependabot-merge-action
+package.json package-lock.json @dependabot-merge-action
