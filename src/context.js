@@ -23,13 +23,14 @@ import player_held_item from './player/held_item.js'
 import player_gamemode from './player/gamemode.js'
 import player_scoreboard from './player/scoreboard.js'
 import player_block_place from './player/block_placement.js'
+import player_respawn from './player/respawn.js'
 import player_bossbar from './player/boss_bar.js'
 import player_action_bar from './player/action_bar.js'
+import player_heartbeat from './player/heartbeat.js'
 import player_traders, {
   register as register_player_traders,
 } from './player/traders.js'
 import player_deal_damage, {
-  DAMAGE_INDICATORS_AMOUNT,
   register as register_player_deal_damage,
 } from './player/damage.js'
 import player_inventory from './player/inventory.js'
@@ -60,6 +61,7 @@ import mobs_look_at from './mobs/look_at.js'
 import mobs_wakeup from './mobs/wakeup.js'
 import mobs_loot from './mobs/loot.js'
 import mobs_attack from './mobs/attack.js'
+import mobs_sound from './mobs/sound.js'
 import commands_declare from './commands/declare.js'
 import start_debug_server from './debug.js'
 import blockchain from './blockchain.js'
@@ -67,6 +69,7 @@ import observe_performance from './performance.js'
 import { abortable } from './iterator.js'
 import Database from './database.js'
 import { USE_RESSOURCE_PACK } from './settings.js'
+import { GameMode } from './gamemode.js'
 
 const log = logger(import.meta)
 
@@ -110,10 +113,6 @@ const initial_state = {
     37: { type: 'bronze_coin', count: 10 },
     38: { type: 'menitrass_100', count: 1 },
   }),
-  damage_indicators: {
-    pool: Array.from({ length: DAMAGE_INDICATORS_AMOUNT }),
-    cursor: -1,
-  },
   looted_items: {
     pool: Array.from({ length: ITEM_LOOT_MAX_COUNT }),
     cursor: 0,
@@ -122,7 +121,7 @@ const initial_state = {
   inventory_cursor: null,
   inventory_cursor_index: 0,
   held_slot_index: 0,
-  game_mode: 2,
+  game_mode: GameMode.ADVENTURE,
   experience: 0,
   health: 40,
   // player's energy, losing after each death
@@ -265,6 +264,8 @@ export async function observe_client(context) {
   player_item_loot.observe(context)
   player_soul.observe(context)
   player_bossbar.observe(context)
+  player_respawn.observe(context)
+  player_heartbeat.observe(context)
 
   commands_declare.observe(context)
 
@@ -279,6 +280,7 @@ export async function observe_client(context) {
   mobs_wakeup.observe(context)
   mobs_loot.observe(context)
   mobs_attack.observe(context)
+  mobs_sound.observe(context)
 
   chunk_update.observe(context)
 }

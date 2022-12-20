@@ -1,13 +1,14 @@
 import { PassThrough, Readable } from 'stream'
 
 import fastify from 'fastify'
-import fastifyCors from 'fastify-cors'
+import cors from '@fastify/cors'
 import { XMLSerializer } from 'xmldom'
 import { aiter } from 'iterator-helper'
 
+import Entities from '../data/entities.json' assert { type: 'json' }
+
 import logger from './logger.js'
 import { trees } from './mobs/behavior_tree.js'
-import { Types } from './mobs/types.js'
 import { SUCCESS, FAILURE, RUNNING } from './behavior.js'
 
 const log = logger(import.meta)
@@ -18,12 +19,12 @@ const log = logger(import.meta)
 function behavior({ world, app }) {
   const serializer = new XMLSerializer()
 
-  const behavior_trees = Object.entries(trees).map(([id, tree]) => ({
-    id,
-    name: Types[id].displayName,
+  const behavior_trees = Object.entries(trees).map(([type, tree]) => ({
+    id: type,
+    name: Entities[type].displayName,
     tree: serializer.serializeToString(tree),
     instances: world.mobs.all
-      .filter(({ mob }) => mob === id)
+      .filter(mob => mob.type === type)
       .map(({ entity_id }) => ({
         id: entity_id,
       })),
@@ -92,11 +93,11 @@ function behavior({ world, app }) {
 export default function start_debug_server({ world }) {
   const app = fastify({ logger: log })
 
-  app.register(fastifyCors, {
+  app.register(cors, {
     origin: true,
   })
 
-  app.listen(4242).then(address => {
+  app.listen({ port: 4242 }).then(address => {
     log.info(
       `Arborist https://aresrpg-arborist.netlify.app/${encodeURIComponent(
         `${address}/behavior`

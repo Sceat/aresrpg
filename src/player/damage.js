@@ -1,26 +1,27 @@
 import { on } from 'events'
+import { setInterval } from 'timers/promises'
 
 import { aiter } from 'iterator-helper'
+import combineAsyncIterators from 'combine-async-iterators'
 
-import { abortable } from '../iterator.js'
 import { Action, Context } from '../events.js'
 import { create_armor_stand } from '../armor_stand.js'
 import logger from '../logger.js'
 import { GameMode } from '../gamemode.js'
+import { abortable } from '../iterator.js'
+import Entities from '../../data/entities.json' assert { type: 'json' }
 
-export const DAMAGE_INDICATORS_AMOUNT = 5
+const DAMAGE_INDICATORS_AMOUNT = 10
+const DAMAGE_INDICATOR_TTL = 1200
 
 const log = logger(import.meta)
 
 /** @param {import('../context.js').InitialWorld} world */
-export function register(world) {
+export function register({ next_entity_id, ...world }) {
   return {
     ...world,
-    damage_indicators: {
-      amount: DAMAGE_INDICATORS_AMOUNT,
-      start_id: world.next_entity_id,
-    },
-    next_entity_id: world.next_entity_id + DAMAGE_INDICATORS_AMOUNT,
+    damage_indicator_start_id: next_entity_id,
+    next_entity_id: next_entity_id + DAMAGE_INDICATORS_AMOUNT,
   }
 }
 
@@ -37,80 +38,77 @@ export default {
         ...state,
         health,
       }
-    } else if (type === Action.DAMAGE_INDICATOR) {
-      const { position, damage } = payload
-      const cursor =
-        (state.damage_indicators.cursor + 1) % DAMAGE_INDICATORS_AMOUNT
-      const pool = [
-        ...state.damage_indicators.pool.slice(0, cursor),
-        { position, damage },
-        ...state.damage_indicators.pool.slice(cursor + 1),
-      ]
-
-      return {
-        ...state,
-        damage_indicators: {
-          cursor,
-          pool,
-        },
-      }
     }
     return state
   },
 
   /** @type {import('../context.js').Observer} */
   observe({ events, dispatch, client, world, signal }) {
-    events.on(Context.MOB_DAMAGE, ({ mob, damage }) => {
-      const position = mob.position()
-      const { height } = mob.constants
+    aiter(
+      abortable(
+        // @ts-ignore
+        combineAsyncIterators(
+          on(events, Context.MOB_DAMAGE, { signal }),
+          on(events, Context.MOB_DEATH, { signal }),
+          setInterval(DAMAGE_INDICATOR_TTL / 2, [{ timer: true }], { signal })
+        )
+      )
+    )
+      .map(([{ mob, damage, timer }]) => ({ mob, damage, timer }))
+      .reduce(
+        ({ cursor: last_cursor, ids }, { mob, damage, timer }) => {
+          if (timer) {
+            // entering here means the iteration is trigered by the interval
+            const now = Date.now()
+            ids
+              .filter(({ age }) => age + DAMAGE_INDICATOR_TTL < now)
+              .forEach(({ entity_id }) =>
+                client.write('entity_destroy', {
+                  entityIds: [entity_id],
+                })
+              )
+            return { cursor: last_cursor, ids }
+          }
 
-      const final_pos = {
-        x: position.x + (Math.random() * 2 - 1) * 0.25,
-        y: position.y + height - 0.25 + (Math.random() * 2 - 1) * 0.15,
-        z: position.z + (Math.random() * 2 - 1) * 0.25,
-      }
-      dispatch(Action.DAMAGE_INDICATOR, { position: final_pos, damage })
-    })
+          const { damage_indicator_start_id } = world
+          const cursor = (last_cursor + 1) % DAMAGE_INDICATORS_AMOUNT
+          const entity_id = damage_indicator_start_id + cursor
+          const { x, y, z } = mob.position()
+          const { height } = mob.constants
+          const position = {
+            x: x + (Math.random() * 2 - 1) * 0.25,
+            y: y + height - 0.25 + (Math.random() * 2 - 1) * 0.15,
+            z: z + (Math.random() * 2 - 1) * 0.25,
+          }
 
-    aiter(abortable(on(events, Context.STATE, { signal }))).reduce(
-      (
-        { cursor: last_cursor, handles },
-        [
-          {
-            damage_indicators: { cursor, pool },
-          },
-        ]
-      ) => {
-        if (last_cursor !== cursor) {
-          const { damage_indicators } = world
-          const { position, damage } = pool[cursor]
-          const entity_id = damage_indicators.start_id + cursor
-
-          clearTimeout(handles[cursor])
-
-          create_armor_stand(client, entity_id, position, {
-            text: `-${damage}`,
-            color: 'red',
-          })
-
-          const handle = setTimeout(() => {
-            client.write('entity_destroy', {
-              entityIds: [entity_id],
+          if (damage !== undefined) {
+            create_armor_stand(client, entity_id, position, {
+              text: `-${damage}`,
+              color: '#E74C3C', // https://materialui.co/flatuicolors Alizarin
             })
-          }, 1200)
-
+          } else {
+            // Death
+            const { xp } = Entities[mob.type]
+            create_armor_stand(client, entity_id, position, {
+              text: `+${xp} xp`,
+              color: '#A6CD57',
+            })
+          }
           return {
             cursor,
-            handles: [
-              ...handles.slice(0, cursor),
-              handle,
-              ...handles.slice(cursor + 1),
+            ids: [
+              ...ids.slice(0, cursor),
+              { entity_id, age: Date.now() },
+              ...ids.slice(cursor + 1),
             ],
           }
+        },
+        {
+          cursor: -1,
+          ids: Array.from({ length: DAMAGE_INDICATORS_AMOUNT }).fill({
+            age: Infinity,
+          }),
         }
-        return { cursor, handles }
-      },
-      { cursor: -1, handles: Array.from({ length: DAMAGE_INDICATORS_AMOUNT }) }
-    )
+      )
   },
 }

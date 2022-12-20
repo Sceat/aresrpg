@@ -5,6 +5,11 @@ import { VERSION } from '../settings.js'
 import { chunk_position } from '../chunk.js'
 import { Action, Context } from '../events.js'
 import { empty_slot, item_to_slot } from '../items.js'
+import items from '../../data/items.json' assert { type: 'json' }
+import { create_armor_stand } from '../armor_stand.js'
+import { to_metadata } from '../entity_metadata.js'
+import { distance2d_squared } from '../math.js'
+
 const mcData = minecraftData(VERSION)
 
 // TODO: export that outside, but where ?
@@ -59,52 +64,21 @@ function teleportation_stones_in_chunk(world, chunk_x, chunk_z) {
   )
 }
 
-// TODO: Create a chat component type ?
 /**
- * create an armor_stand to create
- * a text line with its display name
- * @param {any} client
- * @param {number} entity_id
- * @param {Position} position
- * @param {any} display_name
+ * Return the closest teleportation stone from the player
+ * @param {*} world
+ * @param {*} player_pos_x
+ * @param {*} player_pos_y
+ * @returns {stones} name of the teleportation stone
  */
-function create_armor_stand(client, entity_id, { x, y, z }, display_name) {
-  const mob = {
-    entityId: entity_id,
-    entityUUID: UUID.v4(),
-    type: mcData.entitiesByName.armor_stand.id,
-    x: x + 0.5,
-    y,
-    z: z + 0.5,
-    yaw: 0,
-    pitch: 0,
-    headPitch: 0,
-    velocityX: 0,
-    velocityY: 0,
-    velocityZ: 0,
-  }
-
-  const metadata = {
-    entityId: entity_id,
-    metadata: [
-      // TODO: fix magic number
-      { key: 0, type: 0, value: 0x20 },
-      {
-        key: 2,
-        value: JSON.stringify(display_name),
-        type: 5,
-      },
-      {
-        key: 3,
-        type: 7,
-        value: true,
-      },
-      { key: 14, type: 0, value: 0x10 },
-    ],
-  }
-
-  client.write('spawn_entity_living', mob)
-  client.write('entity_metadata', metadata)
+const PLAYER_ZONE_DISTANCE = 30
+export function closest_stone(world, player_position) {
+  const stones = world.teleportation_stones
+  return stones.find(
+    stone =>
+      Math.sqrt(distance2d_squared(stone.position, player_position)) <=
+      PLAYER_ZONE_DISTANCE
+  )
 }
 
 /**
@@ -131,16 +105,10 @@ function create_slime(client, entity_id, { x, y, z }) {
 
   const metadata = {
     entityId: entity_id,
-    // TODO: fix magic number
-    metadata: [
-      { key: 0, type: 0, value: 0x20 },
-      {
-        key: 3,
-        type: 7,
-        value: true,
-      },
-      { key: 15, type: 1, value: 1 },
-    ],
+    metadata: to_metadata('slime', {
+      entity_flags: { is_invisible: true },
+      size: 1,
+    }),
   }
 
   client.write('spawn_entity_living', mob)
@@ -162,12 +130,12 @@ function on_chunk_loaded({ world, client }) {
     }
 
     const spawn_entities = ({
-      position,
+      position: { x, y, z },
       text,
       entity_ids: [line_id, hitbox_id],
     }) => {
-      create_armor_stand(client, line_id, position, text)
-      create_slime(client, hitbox_id, position)
+      create_armor_stand(client, line_id, { x: x + 0.5, y, z: z + 0.5 }, text)
+      create_slime(client, hitbox_id, { x, y, z })
       client.write('set_passengers', {
         entityId: line_id,
         passengers: [hitbox_id],
@@ -273,9 +241,7 @@ function on_window_click({ world, client, dispatch, get_state }) {
           ...inventory
             .slice(9, 45)
             .map(item =>
-              item
-                ? item_to_slot(world.items[item.type], item.count)
-                : empty_slot
+              item ? item_to_slot(items[item.type], item.count) : empty_slot
             ),
         ],
       })

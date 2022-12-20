@@ -6,12 +6,12 @@ import { aiter } from 'iterator-helper'
 
 import { VERSION } from '../settings.js'
 import { Context } from '../events.js'
-
-import { Types } from './types.js'
+import Entities from '../../data/entities.json' assert { type: 'json' }
+import { to_metadata } from '../entity_metadata.js'
 
 const { entitiesByName } = minecraft_data(VERSION)
 
-const color_by_type = {
+export const color_by_category = {
   mob: 'white',
   archiMob: 'gold',
   boss: 'red',
@@ -32,13 +32,13 @@ function despawn_signal({ events, entity_id }) {
 }
 
 export function spawn_mob(client, { mob, position, events }) {
-  const { entity_id, mob: mob_type, level } = mob
-  const { type, mob: entity_type, displayName } = Types[mob_type]
+  const { entity_id, type, level } = mob
+  const { category, minecraft_entity, displayName } = Entities[type]
 
   client.write('spawn_entity_living', {
     entityId: entity_id,
     entityUUID: UUID.v4(),
-    type: entitiesByName[entity_type].id,
+    type: entitiesByName[minecraft_entity].id,
     x: position.x,
     y: position.y,
     z: position.z,
@@ -52,22 +52,14 @@ export function spawn_mob(client, { mob, position, events }) {
 
   client.write('entity_metadata', {
     entityId: entity_id,
-    metadata: [
-      {
-        key: 2,
-        type: 5,
-        value: JSON.stringify({
-          text: displayName + `(${entity_id})`,
-          color: color_by_type[type],
-          extra: level && [{ text: ` [Lvl ${level}]`, color: 'dark_red' }],
-        }),
-      },
-      {
-        key: 3,
-        type: 7,
-        value: true,
-      },
-    ],
+    metadata: to_metadata('entity', {
+      custom_name: JSON.stringify({
+        text: displayName,
+        color: color_by_category[category],
+        extra: level && [{ text: ` [Lvl ${level}]`, color: 'dark_red' }],
+      }),
+      is_custom_name_visible: true,
+    }),
   })
 
   events.emit(Context.MOB_SPAWNED, {

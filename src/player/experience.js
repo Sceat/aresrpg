@@ -8,9 +8,11 @@ import Nbt from 'prismarine-nbt'
 import { Context, Action } from '../events.js'
 import { abortable } from '../iterator.js'
 import { write_title } from '../title.js'
-import { write_sound, SOUND } from '../sound.js'
+import { play_sound } from '../sound.js'
 import { client_chat_msg } from '../chat.js'
 import { VERSION } from '../settings.js'
+import { to_metadata } from '../entity_metadata.js'
+import Entities from '../../data/entities.json' assert { type: 'json' }
 
 const mcData = minecraftData(VERSION)
 
@@ -186,7 +188,7 @@ export default {
   },
 
   /** @type {import('../context.js').Observer} */
-  observe({ client, events, signal, world }) {
+  observe({ client, events, signal, world, dispatch }) {
     aiter(abortable(on(events, Context.STATE, { signal }))).reduce(
       (last_total_experience, [{ experience: total_experience, position }]) => {
         if (last_total_experience !== total_experience) {
@@ -266,9 +268,9 @@ export default {
                 message,
               })
 
-              write_sound({
+              play_sound({
                 client,
-                sound: SOUND.LEVEL_UP,
+                sound: 'entity.player.levelup',
                 ...position,
               })
 
@@ -287,60 +289,56 @@ export default {
 
               client.write('entity_metadata', {
                 entityId: world.new_level_firework_entity_id,
-                metadata: [
-                  {
-                    key: 7,
-                    type: 6,
-                    value: {
-                      present: true,
-                      itemId: mcData.itemsByName.firework_rocket.id,
-                      itemCount: 1,
-                      nbtData: {
-                        type: 'compound',
-                        name: '',
-                        value: {
-                          Fireworks: Nbt.comp({
-                            Explosions: {
-                              type: 'list',
-                              value: {
-                                type: 'compound',
-                                value: [
-                                  {
-                                    Type: Nbt.byte(2),
-                                    Colors: {
-                                      type: 'intArray',
-                                      value: [0x039be5],
-                                    },
-                                    FadeColors: {
-                                      type: 'intArray',
-                                      value: [0xfdd835, 0xfdd835, 0xfdd835],
-                                    },
-                                    Flicker: Nbt.byte(1),
-                                    Trail: Nbt.byte(1),
+                metadata: to_metadata('firework_rocket_entity', {
+                  firework_info: {
+                    present: true,
+                    itemId: mcData.itemsByName.firework_rocket.id,
+                    itemCount: 1,
+                    nbtData: {
+                      type: 'compound',
+                      name: '',
+                      value: {
+                        Fireworks: Nbt.comp({
+                          Explosions: {
+                            type: 'list',
+                            value: {
+                              type: 'compound',
+                              value: [
+                                {
+                                  Type: Nbt.byte(2),
+                                  Colors: {
+                                    type: 'intArray',
+                                    value: [0x039be5],
                                   },
-                                  {
-                                    Type: Nbt.byte(2),
-                                    Colors: {
-                                      type: 'intArray',
-                                      value: [0xfdd835],
-                                    },
-                                    FadeColors: {
-                                      type: 'intArray',
-                                      value: [0xfdd835],
-                                    },
-                                    Flicker: Nbt.byte(1),
-                                    Trail: Nbt.byte(1),
+                                  FadeColors: {
+                                    type: 'intArray',
+                                    value: [0xfdd835, 0xfdd835, 0xfdd835],
                                   },
-                                ],
-                              },
+                                  Flicker: Nbt.byte(1),
+                                  Trail: Nbt.byte(1),
+                                },
+                                {
+                                  Type: Nbt.byte(2),
+                                  Colors: {
+                                    type: 'intArray',
+                                    value: [0xfdd835],
+                                  },
+                                  FadeColors: {
+                                    type: 'intArray',
+                                    value: [0xfdd835],
+                                  },
+                                  Flicker: Nbt.byte(1),
+                                  Trail: Nbt.byte(1),
+                                },
+                              ],
                             },
-                            Flight: Nbt.byte(0),
-                          }),
-                        },
+                          },
+                          Flight: Nbt.byte(0),
+                        }),
                       },
                     },
                   },
-                ],
+                }),
               })
 
               client.write('entity_status', {
@@ -348,9 +346,9 @@ export default {
                 entityStatus: 17,
               })
             } else {
-              write_sound({
+              play_sound({
                 client,
-                sound: SOUND.EXPERIENCE_ORB,
+                sound: 'entity.experience_orb.pickup',
                 ...position,
               })
             }
@@ -360,5 +358,9 @@ export default {
       },
       null
     )
+    events.on(Context.MOB_DEATH, ({ mob }) => {
+      const { xp } = Entities[mob.type]
+      dispatch(Action.ADD_EXPERIENCE, { experience: +xp })
+    })
   },
 }

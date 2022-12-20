@@ -4,7 +4,8 @@ import { EventEmitter } from 'events'
 import minecraft_data from 'minecraft-data'
 import { aiter } from 'iterator-helper'
 
-import { Types } from './mobs/types.js'
+import Entities from '../data/entities.json' assert { type: 'json' }
+
 import { last_event_value, Mob } from './events.js'
 import { path_end, path_position } from './mobs/path.js'
 import mobs_goto from './mobs/goto.js'
@@ -15,7 +16,7 @@ import { VERSION } from './settings.js'
 
 const { entitiesByName } = minecraft_data(VERSION)
 
-function reduce_mob(state, action, world) {
+function reduce_mob(state, action, context) {
   return [
     //
     mobs_goto.reduce_mob,
@@ -23,7 +24,7 @@ function reduce_mob(state, action, world) {
     behavior_tree.reduce_mob,
     mobs_target.reduce_mob,
   ].reduce(
-    async (intermediate, fn) => fn(await intermediate, action, world),
+    async (intermediate, fn) => fn(await intermediate, action, context),
     state
   )
 }
@@ -38,8 +39,8 @@ const MOVEMENT_SPEED_TO_BLOCKS_PER_SECOND = 10
 
 /** @param {import('./context.js').InitialWorld} world */
 export function register(world) {
-  const mobs = world.mob_positions.map(({ position, mob, level }, i) => {
-    const { speed = DEFAULT_SPEED, health } = Types[mob]
+  const mobs = world.mob_positions.map(({ position, type, level }, i) => {
+    const { speed = DEFAULT_SPEED, health } = Entities[type]
     const initial_state = {
       path: [position],
       open: [],
@@ -65,7 +66,7 @@ export function register(world) {
     aiter(actions).reduce(async (last_state, action) => {
       const state = await reduce_mob(last_state, action, {
         world: world.get(),
-        mob,
+        type,
         entity_id,
       })
       events.emit(Mob.STATE, state)
@@ -78,18 +79,18 @@ export function register(world) {
 
     return {
       entity_id,
-      mob,
+      type,
       level,
       events,
       get_state,
-      constants: entitiesByName[Types[mob].mob],
+      constants: entitiesByName[Entities[type].minecraft_entity],
       position(time = Date.now()) {
         const { path, start_time, speed } = get_state()
 
         return path_position({ path, time, start_time, speed })
       },
-      dispatch(type, payload, time = Date.now()) {
-        actions.write({ type, payload, time })
+      dispatch(action_type, payload, time = Date.now()) {
+        actions.write({ type: action_type, payload, time })
       },
     }
   })
