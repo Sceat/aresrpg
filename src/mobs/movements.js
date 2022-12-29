@@ -10,7 +10,7 @@ import { abortable } from '../iterator.js'
 import { PlayerEvent } from '../events.js'
 
 import { despawn_mobs, spawn_mob } from './spawn.js'
-
+// jel
 export default {
   /** @type {import('../context.js').Observer} */
   observe({ client, events, world, inside_view }) {
